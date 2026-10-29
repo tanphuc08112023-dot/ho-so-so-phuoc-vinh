@@ -115,10 +115,10 @@ function choose(docId){selected=docId;render()}function current(){return db.docs
 function logsContent(n){let arr=db.logs.filter(l=>isAdmin()||(l.doc&&db.docs.some(d=>d.id===l.doc&&allowed(d)))||(!l.doc&&l.user===me().name)).slice(0,n);return arr.length?`<div class="log"><table><tr><th>Thời gian</th><th>Người thực hiện</th><th>Nội dung</th></tr>${arr.map(l=>`<tr><td>${esc(l.date)}</td><td>${esc(l.user)}</td><td>${esc(l.action)}</td></tr>`).join('')}</table></div>`:'<p class="muted">Chưa có thao tác</p>'}function historyPage(){return `<div class="panel"><h3>Lịch sử ký và thao tác</h3>${logsContent(1000)}<button class="btn" onclick="exportCsv()">Xuất CSV</button></div>`}function statsPage(){let a=docs();return `<div class="panel"><h3>Thống kê năm học ${year}</h3><div class="stats">${[['Tổng hồ sơ',a.length],['Chưa trình ký',a.filter(d=>!d.teacherSigned).length],['Chờ duyệt',a.filter(d=>d.teacherSigned&&!d.approved).length],['Đã duyệt',a.filter(d=>d.approved).length]].map(x=>`<div class="stat s1"><div><b>${x[1]}</b>${x[0]}</div></div>`).join('')}</div><h3>Thống kê theo tổ</h3><table><tr><th>Tổ</th><th>Tổng</th><th>Đã duyệt</th></tr>${(isAdmin()||me().role==='bgh'?teams:[me().team]).map(t=>`<tr><td>${esc(t)}</td><td>${a.filter(d=>d.team===t).length}</td><td>${a.filter(d=>d.team===t&&d.approved).length}</td></tr>`).join('')}</table><br><button class="btn" onclick="exportCsv()">Xuất CSV</button></div>`}
 function showModal(html){modal=html;document.body.insertAdjacentHTML('beforeend',`<div class="modalbg" id="modalbg" onclick="if(event.target===this)closeModal()"><div class="modal">${html}</div></div>`)}function closeModal(){$('#modalbg')?.remove();canvas=null;ctx=null}
 function openUpload(){let u=me();if(u.role==='bgh')return alert('Ban Giám hiệu có quyền xem và phê duyệt; không tạo hồ sơ thay giáo viên.');showModal(`<h2>＋ Tải lên giáo án / hồ sơ</h2><form class="form" onsubmit="upload(event)"><label>Tên hồ sơ<input id="f_title" required placeholder="Ví dụ: KHBD Toán tuần 10"></label><label>Loại hồ sơ<select id="f_type"><option>Giáo án</option><option>Kế hoạch giáo dục</option><option>Biên bản</option><option>Hồ sơ chuyên môn</option><option>Khác</option></select></label><label>Môn học<select id="f_subject">${subjects.map(s=>`<option>${s}</option>`).join('')}</select></label><label>Lớp<input id="f_class" placeholder="5A7"></label><label>Tuần<input id="f_week" type="number" min="1" max="35" value="1"></label><label>Tổ<select id="f_team" ${!isAdmin()?'disabled':''}>${(isAdmin()?teams:[u.team]).map(t=>`<option ${u.team===t?'selected':''}>${t}</option>`).join('')}</select></label><label>Tệp PDF / Word<input id="f_file" type="file" accept=".pdf,.doc,.docx" required></label><p class="notice">LƯU Ý: Tệp hiện chỉ lưu trong trình duyệt này (IndexedDB), chưa tải lên Supabase Storage và không xuất hiện trên thiết bị khác. Hãy sao lưu tệp gốc.</p><div class="modalfoot"><button type="button" class="btn" onclick="closeModal()">Hủy</button><button class="btn primary">Lưu hồ sơ</button></div></form>`)}
-function fileStore(){return new Promise((resolve,reject)=>{let r=indexedDB.open('pv_files',1);r.onupgradeneeded=()=>r.result.createObjectStore('files');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})}async function putFile(key,file){let d=await fileStore();return new Promise((res,rej)=>{let t=d.transaction('files','readwrite');t.objectStore('files').put(file,key);t.oncomplete=()=>{d.close();res()};t.onerror=()=>rej(t.error)})}async function getFile(key){let d=await fileStore();return new Promise((res,rej)=>{let t=d.transaction('files');let r=t.objectStore('files').get(key);r.onsuccess=()=>{d.close();res(r.result)};r.onerror=()=>rej(r.error)})}async function removeFile(key){let d=await fileStore();return new Promise(res=>{let t=d.transaction('files','readwrite');t.objectStore('files').delete(key);t.oncomplete=()=>{d.close();res()}})}async function upload(e){e.preventDefault();if(!me()||me().role==='bgh')return alert('Không có quyền tạo hồ sơ');let f=$('#f_file').files[0];if(!f)return;if(f.size>25*1024*1024)return alert('Tệp tối đa 25 MB');let d={id:id(),title:$('#f_title').value.trim(),type:$('#f_type').value,subject:$('#f_subject').value,className:$('#f_class').value,week:$('#f_week').value,team:isAdmin()?$('#f_team').value:me().team,owner:uid,ownerName:me().name,year,date:now(),fileName:f.name,teacherSigned:null,leaderSigned:null,approved:null};try{await putFile(d.id,f);db.docs.unshift(d);log('Tải lên: '+d.title,d.id);selected=d.id;closeModal();render()}catch(err){alert('Không lưu được tệp: '+err.message)}}async function downloadDoc(key){let d=db.docs.find(x=>x.id===key&&allowed(x));if(!d)return;let f=await getFile(key);if(!f)return alert('Không tìm thấy tệp trên trình duyệt này');let url=URL.createObjectURL(f),a=document.createElement('a');a.href=url;a.download=d.fileName;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);log('Tải xuống: '+d.title,key);render()}async function previewDoc(key){let d=db.docs.find(x=>x.id===key&&allowed(x));if(!d)return;let f=await getFile(key);if(!f)return alert('Không tìm thấy tệp trên trình duyệt này');if(f.type!=='application/pdf'&&!d.fileName.toLowerCase().endsWith('.pdf'))return alert('Trình duyệt xem trước PDF trực tiếp. Tệp Word cần tải xuống để xem.');let url=URL.createObjectURL(f);window.open(url,'_blank');setTimeout(()=>URL.revokeObjectURL(url),120000)}
-function openEdit(){let d=current();if(!d)return;if(!canModify(d))return alert('Chỉ chủ hồ sơ được sửa trước khi ký');if(d.teacherSigned&&!d.returned)return alert('Hồ sơ đã ký, không thể sửa. Hãy tạo phiên bản mới.');showModal(`<h2>Chỉnh sửa thông tin hồ sơ</h2><form class="form" onsubmit="editDoc(event,'${d.id}')"><label>Tên hồ sơ<input id="editTitle" value="${esc(d.title)}" required></label><label>Lớp<input id="editClass" value="${esc(d.className)}"></label><label>Tuần<input id="editWeek" type="number" min="1" max="35" value="${esc(d.week)}"></label><div class="modalfoot"><button type="button" class="btn" onclick="closeModal()">Hủy</button><button class="btn primary">Lưu thay đổi</button></div></form>`)}function editDoc(e,key){e.preventDefault();let d=db.docs.find(x=>x.id===key);if(!canModify(d))return;d.title=$('#editTitle').value;d.className=$('#editClass').value;d.week=$('#editWeek').value;if(d.returned){d.teacherSigned=null;d.leaderSigned=null;d.approved=null;d.returned=null;d.revision=(d.revision||1)+1;}log('Chỉnh sửa hồ sơ: '+d.title,key);closeModal();render()}async function deleteDoc(key){let d=db.docs.find(x=>x.id===key);if(!canTrash(d))return alert('Không có quyền chuyển hồ sơ này vào Thùng rác');if(!confirm('Chuyển hồ sơ "'+d.title+'" vào Thùng rác? Tệp Word/PDF và thông tin ký duyệt sẽ được giữ nguyên trên trình duyệt này.'))return;const oldDocs=db.docs.slice(),oldTrash=db.trash.slice();try{db.docs=db.docs.filter(x=>x.id!==key);db.trash.unshift({...d,deletedAt:now(),deletedBy:me()?.name||'Người dùng',deletedById:uid});save();log('Chuyển vào Thùng rác: '+d.title,key);selected='';render()}catch(e){db.docs=oldDocs;db.trash=oldTrash;save();alert('Không thể chuyển vào Thùng rác: '+e.message)}}
-function trashPage(){let a=trashed();return `<section class="panel"><h3>🗑 Thùng rác (${a.length})</h3><p class="notice">BẢN THỬ NGHIỆM: Danh sách Thùng rác hiển thị từ dữ liệu trên trình duyệt; trạng thái trên Supabase có thể khác. Nút kiểm tra xóa vĩnh viễn chỉ gọi máy chủ để kiểm tra, KHÔNG xóa hồ sơ. Chưa xác minh được lịch sử ký duyệt đáng tin cậy; hồ sơ cũ không được tự động xem là chưa ký. Không xóa dữ liệu trình duyệt hoặc tệp gốc.</p><div class="tablewrap"><table><thead><tr><th>Tên hồ sơ</th><th>Người tạo</th><th>Tổ</th><th>Người xóa</th><th>Thời gian xóa</th><th>Trạng thái trước khi xóa</th><th>Thao tác</th></tr></thead><tbody>${a.map(d=>`<tr><td><b>${esc(d.title)}</b><div class="muted">${esc(d.fileName||'')}</div></td><td>${esc(d.ownerName)}</td><td>${esc(d.team)}</td><td>${esc(d.deletedBy)}</td><td>${esc(d.deletedAt)}</td><td>${esc(status(d))}</td><td><button class="btn success" onclick="restoreDoc('${d.id}')">↶ Khôi phục</button>${d.owner===uid?` <button class="btn danger" type="button" onclick="pvTestPermanentDelete('${d.id}')">🔒 Kiểm tra xóa vĩnh viễn</button>`:""}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">Thùng rác chưa có hồ sơ.</td></tr>'}</tbody></table></div></section>`}
-function restoreDoc(key){let d=db.trash.find(x=>x.id===key);if(!d||!canTrash(d))return alert('Không có quyền khôi phục hồ sơ');if(db.docs.some(x=>x.id===key))return alert('Hồ sơ đã tồn tại trong danh sách');if(!confirm('Khôi phục "'+d.title+'" về danh sách hồ sơ?'))return;let oldDocs=db.docs.slice(),oldTrash=db.trash.slice();try{let restored={...d};delete restored.deletedAt;delete restored.deletedBy;delete restored.deletedById;db.docs.unshift(restored);db.trash=db.trash.filter(x=>x.id!==key);save();log('Khôi phục từ Thùng rác: '+d.title,key);selected=key;view='Hồ sơ';render()}catch(e){db.docs=oldDocs;db.trash=oldTrash;save();alert('Khôi phục không thành công: '+e.message)}}
+function fileStore(){return new Promise((resolve,reject)=>{let r=indexedDB.open('pv_files',1);r.onupgradeneeded=()=>r.result.createObjectStore('files');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})}async function putFile(key,file){let d=await fileStore();return new Promise((res,rej)=>{let t=d.transaction('files','readwrite');t.objectStore('files').put(file,key);t.oncomplete=()=>{d.close();res()};t.onerror=()=>rej(t.error)})}async function getFile(key){let d=await fileStore();return new Promise((res,rej)=>{let t=d.transaction('files');let r=t.objectStore('files').get(key);r.onsuccess=()=>{d.close();res(r.result)};r.onerror=()=>rej(r.error)})}async function removeFile(key){let d=await fileStore();return new Promise(res=>{let t=d.transaction('files','readwrite');t.objectStore('files').delete(key);t.oncomplete=()=>{d.close();res()}})}async function upload(e){e.preventDefault();if(!me()||me().role==='bgh')return alert('Không có quyền tạo hồ sơ');let f=$('#f_file').files[0];if(!f)return;if(f.size>25*1024*1024)return alert('Tệp tối đa 25 MB');let d={id:id(),title:$('#f_title').value.trim(),type:$('#f_type').value,subject:$('#f_subject').value,className:$('#f_class').value,week:$('#f_week').value,team:isAdmin()?$('#f_team').value:me().team,owner:uid,ownerName:me().name,year,date:now(),fileName:f.name,teacherSigned:null,leaderSigned:null,approved:null};try{await pvCloudUploadNew(d,f);await putFile(d.id,f);db.docs.unshift(d);log('Tải lên: '+d.title,d.id);selected=d.id;closeModal();render()}catch(err){alert('Chưa tải hồ sơ lên máy chủ: '+err.message+'\nVui lòng thử lại; không ghi hồ sơ chỉ trên máy này.')}}async function downloadDoc(key){let d=db.docs.find(x=>x.id===key&&allowed(x));if(!d)return;let f=await getFile(key);if(!f)return alert('Không tìm thấy tệp trên trình duyệt này');let url=URL.createObjectURL(f),a=document.createElement('a');a.href=url;a.download=d.fileName;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);log('Tải xuống: '+d.title,key);render()}async function previewDoc(key){let d=db.docs.find(x=>x.id===key&&allowed(x));if(!d)return;let f=await getFile(key);if(!f)return alert('Không tìm thấy tệp trên trình duyệt này');if(f.type!=='application/pdf'&&!d.fileName.toLowerCase().endsWith('.pdf'))return alert('Trình duyệt xem trước PDF trực tiếp. Tệp Word cần tải xuống để xem.');let url=URL.createObjectURL(f);window.open(url,'_blank');setTimeout(()=>URL.revokeObjectURL(url),120000)}
+function openEdit(){let d=current();if(!d)return;if(!canModify(d))return alert('Chỉ chủ hồ sơ được sửa trước khi ký');if(d.teacherSigned&&!d.returned)return alert('Hồ sơ đã ký, không thể sửa. Hãy tạo phiên bản mới.');showModal(`<h2>Chỉnh sửa thông tin hồ sơ</h2><form class="form" onsubmit="editDoc(event,'${d.id}')"><label>Tên hồ sơ<input id="editTitle" value="${esc(d.title)}" required></label><label>Lớp<input id="editClass" value="${esc(d.className)}"></label><label>Tuần<input id="editWeek" type="number" min="1" max="35" value="${esc(d.week)}"></label><div class="modalfoot"><button type="button" class="btn" onclick="closeModal()">Hủy</button><button class="btn primary">Lưu thay đổi</button></div></form>`)}function editDoc(e,key){e.preventDefault();let d=db.docs.find(x=>x.id===key);if(!canModify(d))return;d.title=$('#editTitle').value;d.className=$('#editClass').value;d.week=$('#editWeek').value;if(d.returned){d.teacherSigned=null;d.leaderSigned=null;d.approved=null;d.returned=null;d.revision=(d.revision||1)+1;}log('Chỉnh sửa hồ sơ: '+d.title,key);closeModal();render()}async function deleteDoc(key){let d=db.docs.find(x=>x.id===key);if(!canTrash(d))return alert('Không có quyền chuyển hồ sơ này vào Thùng rác');if(!confirm('Chuyển hồ sơ "'+d.title+'" vào Thùng rác? Tệp Word/PDF và thông tin ký duyệt sẽ được giữ nguyên trên trình duyệt này.'))return;const oldDocs=db.docs.slice(),oldTrash=db.trash.slice();try{await pvCloudSetDeleted(d,true);db.docs=db.docs.filter(x=>x.id!==key);db.trash.unshift({...d,deletedAt:now(),deletedBy:me()?.name||'Người dùng',deletedById:uid});save();log('Chuyển vào Thùng rác: '+d.title,key);selected='';render()}catch(e){db.docs=oldDocs;db.trash=oldTrash;save();alert('Không thể chuyển vào Thùng rác: '+e.message)}}
+function trashPage(){let a=trashed();return `<section class="panel"><h3>🗑 Thùng rác (${a.length})</h3><p class="notice">Thùng rác được đồng bộ từ Supabase khi đăng nhập. Xóa vĩnh viễn yêu cầu chủ hồ sơ xác nhận và máy chủ cấp quyền; nếu máy chủ đang khóa, dữ liệu vẫn được giữ nguyên.</p><div class="tablewrap"><table><thead><tr><th>Tên hồ sơ</th><th>Người tạo</th><th>Tổ</th><th>Người xóa</th><th>Thời gian xóa</th><th>Trạng thái trước khi xóa</th><th>Thao tác</th></tr></thead><tbody>${a.map(d=>`<tr><td><b>${esc(d.title)}</b><div class="muted">${esc(d.fileName||'')}</div></td><td>${esc(d.ownerName)}</td><td>${esc(d.team)}</td><td>${esc(d.deletedBy)}</td><td>${esc(d.deletedAt)}</td><td>${esc(status(d))}</td><td><button class="btn success" onclick="restoreDoc('${d.id}')">↶ Khôi phục</button>${d.owner===uid?` <button class="btn danger" type="button" onclick="pvDeleteForever('${d.id}')">🗑 Xóa vĩnh viễn</button>`:""}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">Thùng rác chưa có hồ sơ.</td></tr>'}</tbody></table></div></section>`}
+async function restoreDoc(key){let d=db.trash.find(x=>x.id===key);if(!d||!canTrash(d))return alert('Không có quyền khôi phục hồ sơ');if(db.docs.some(x=>x.id===key))return alert('Hồ sơ đã tồn tại trong danh sách');if(!confirm('Khôi phục "'+d.title+'" về danh sách hồ sơ?'))return;let oldDocs=db.docs.slice(),oldTrash=db.trash.slice();try{await pvCloudSetDeleted(d,false);let restored={...d};delete restored.deletedAt;delete restored.deletedBy;delete restored.deletedById;db.docs.unshift(restored);db.trash=db.trash.filter(x=>x.id!==key);save();log('Khôi phục từ Thùng rác: '+d.title,key);selected=key;view='Hồ sơ';render()}catch(e){db.docs=oldDocs;db.trash=oldTrash;save();alert('Khôi phục không thành công: '+e.message)}}
 
 function openSign(key,step){let d=db.docs.find(x=>x.id===key);if(!d||!canSign(d,step))return alert('Không đủ quyền hoặc chưa đến lượt ký');if(step==='leader'||step==='bgh'){showModal(`<h2>Duyệt giáo án – ${step==='leader'?'Tổ trưởng':'Ban Giám hiệu'}</h2><p><b>${esc(d.title)}</b></p><p class="notice">Không cần chữ ký. Có thể nhận xét hoặc góp ý trước khi duyệt. Nếu từ chối phải nêu rõ lý do.</p><form class="form" onsubmit="event.preventDefault();approveReview('${key}','${step}')"><label>Nhận xét (không bắt buộc)<textarea id="leaderComment" maxlength="2000" placeholder="Nhận xét, góp ý nếu có..."></textarea></label><div class="modalfoot"><button type="button" class="btn" onclick="closeModal()">Hủy</button><button type="button" class="btn danger" onclick="rejectReview('${key}','${step}')">✕ Từ chối</button><button class="btn success" type="submit">${step==='leader'?'✓ Duyệt và chuyển BGH':'✓ Phê duyệt hoàn tất'}</button></div></form>`);return;}showModal(`<h2>Xác nhận và gửi tổ trưởng</h2><p><b>${esc(d.title)}</b></p><p>Giáo viên: ${esc(me().name)}</p><p class="notice">Không cần vẽ chữ ký. Hệ thống ghi nhận tên tài khoản và thời gian xác nhận.</p><div class="modalfoot"><button class="btn" onclick="closeModal()">Hủy</button><button class="btn primary" onclick="confirmSign('${key}','teacher')">✓ Xác nhận và gửi tổ trưởng</button></div>`)}function clearSign(){ctx?.clearRect(0,0,canvas.width,canvas.height);canvas.dataset.used=''}function confirmSign(key,step){let d=db.docs.find(x=>x.id===key);if(!d||!canSign(d,step))return alert('Không đủ quyền ký');let field={teacher:'teacherSigned',leader:'leaderSigned',bgh:'approved'}[step];d[field]={name:me().name,userId:uid,date:now(),signature:null};d.returned=null;log('Ký '+({teacher:'giáo viên',leader:'tổ trưởng',bgh:'BGH'}[step])+': '+d.title,key);closeModal();render()}
 
@@ -262,95 +262,69 @@ function reviewStatus(d,key,label){const x=d[key];if(x){return `<div class="pv-r
 #pv-cloud-panel button:disabled{opacity:.45}#pv-cloud-panel .pv-cloud-close{float:right;background:white;color:#1769b8}
 #pv-cloud-panel p{margin:8px 0;line-height:1.5}#pv-cloud-panel small{color:#5c6878}
 </style>
-<script id="pv-cloud-migration-script">
-(function(){
-'use strict';
-const BUCKET='ho-so-phuoc-vinh';
-const TABLE='pv_documents';
-const ext = name => (String(name||'').match(/\.(pdf|docx|doc)$/i)||[])[1]?.toLowerCase()||'bin';
-const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-function cloud(){if(typeof pvSupabase==='undefined'||!pvSupabase)throw Error('Chưa kết nối Supabase');return pvSupabase}
-function activeUser(){if(typeof pvAuthUser==='undefined'||!pvAuthUser?.id)throw Error('Cần đăng nhập Supabase trước');return pvAuthUser}
-function localDocs(){return JSON.parse(localStorage.getItem('pv_hoso_v3')||'{}').docs||[]}
-function setMessage(s){const el=document.getElementById('pv-cloud-message');if(el)el.textContent=s}
-function panel(){if(document.getElementById('pv-cloud-panel'))return;const p=document.createElement('section');p.id='pv-cloud-panel';p.innerHTML=`<button class="pv-cloud-close" type="button" id="pv-cloud-close">Ẩn</button><b>☁ Sao lưu và đồng bộ hồ sơ</b><p><small>Chạy trên MÁY GỐC trước. Không xóa dữ liệu cục bộ. Chỉ chuyển hồ sơ thuộc tài khoản đang đăng nhập.</small></p><p id="pv-cloud-message">Sẵn sàng kiểm tra.</p><button id="pv-cloud-backup" type="button">1. Tải bản sao lưu JSON</button><button id="pv-cloud-upload" type="button">2. Chuyển lên Supabase</button><button id="pv-cloud-check" type="button">3. Kiểm tra đám mây</button>`;document.body.appendChild(p);
- p.querySelector('#pv-cloud-close').onclick=()=>p.remove();p.querySelector('#pv-cloud-backup').onclick=backup;p.querySelector('#pv-cloud-upload').onclick=migrate;p.querySelector('#pv-cloud-check').onclick=check;
+<script id="pv-cloud-live-sync-20261029">
+/* Authoritative cloud storage for newly created records; never delete remote data on sync failure. */
+const PV_DOC_TABLE='pv_documents',PV_DOC_BUCKET='ho-so-phuoc-vinh';
+function pvCloud(){if(!pvSupabase||!pvAuthUser?.id)throw Error('Cần đăng nhập Supabase và kết nối Internet');return pvSupabase}
+function pvCloudPath(d){const suffix=String(d.fileName||'').match(/\.(pdf|docx|doc)$/i)?.[1]?.toLowerCase()||'bin';return pvAuthUser.id+'/'+d.id+'.'+suffix}
+async function pvCloudUploadNew(d,file){
+ const sb=pvCloud();const path=pvCloudPath(d);
+ const {error:upErr}=await sb.storage.from(PV_DOC_BUCKET).upload(path,file,{upsert:false,contentType:file.type||'application/octet-stream'});
+ if(upErr)throw upErr;
+ const {error:rowErr}=await sb.from(PV_DOC_TABLE).insert({id:d.id,owner_id:pvAuthUser.id,title:d.title,file_name:d.fileName,file_path:path,team_name:d.team,payload:d});
+ if(rowErr)throw Error('Không ghi được thông tin hồ sơ: '+rowErr.message+' (tệp đã tải lên máy chủ; báo quản trị để xử lý)');
 }
-function backup(){try{const data=localStorage.getItem('pv_hoso_v3')||'{}';const b=new Blob([data],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='PV_SAO_LUU_DANH_SACH_'+new Date().toISOString().slice(0,10)+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000);setMessage('Đã xuất DANH SÁCH JSON. Chú ý: JSON KHÔNG chứa nội dung tệp Word/PDF trong IndexedDB. Hãy tiếp tục bước 2 để chuyển các tệp.')}catch(e){setMessage('Lỗi: '+e.message)}}
-async function migrate(){const b=document.getElementById('pv-cloud-upload');b.disabled=true;try{const u=activeUser(),sb=cloud();const own=localDocs().filter(d=>d.owner===u.id);if(!own.length)throw Error('Không tìm thấy hồ sơ của tài khoản này trên máy gốc. Không thử với tài khoản khác.');if(!confirm('Chuyển '+own.length+' hồ sơ của tài khoản hiện tại lên Supabase? Không xóa bản gốc.'))return;
- let done=0,fail=[];for(const d of own){try{setMessage('Đang chuyển '+(done+fail.length+1)+'/'+own.length+': '+d.title);
- const {data:existing,error:readErr}=await sb.from(TABLE).select('id,file_path').eq('id',d.id).maybeSingle();if(readErr)throw readErr;
- if(existing){done++;continue}
- if(typeof getFile!=='function')throw Error('Không tìm thấy bộ đọc IndexedDB');const file=await getFile(d.id);if(!file)throw Error('Tệp gốc không còn trong IndexedDB');
- const path=u.id+'/'+d.id+'.'+ext(d.fileName||file.name);
- const {error:uploadErr}=await sb.storage.from(BUCKET).upload(path,file,{upsert:false,contentType:file.type||'application/octet-stream'});
- if(uploadErr&&!/already exists|duplicate/i.test(uploadErr.message||''))throw uploadErr;
- const {error:metaErr}=await sb.from(TABLE).insert({id:d.id,owner_id:u.id,title:d.title||d.fileName||'Hồ sơ',file_name:d.fileName||'document',file_path:path,team_name:d.team||'',payload:d});if(metaErr)throw metaErr;done++;
- }catch(e){fail.push((d.title||d.id)+': '+e.message)}await sleep(40)}
- setMessage('Đã chuyển '+done+'/'+own.length+' hồ sơ. '+(fail.length?'Lỗi: '+fail.join(' | '):'Không có lỗi. Mở máy thứ hai để kiểm tra.') );
- }catch(e){setMessage('Chưa chuyển được: '+e.message+'. Nếu báo thiếu bảng pv_documents, cần chạy tệp SQL đi kèm trước.')}finally{b.disabled=false}}
-async function check(){try{const u=activeUser(),sb=cloud();const {data,error}=await sb.from(TABLE).select('id,title,file_name,file_path').eq('owner_id',u.id).order('created_at',{ascending:false});if(error)throw error;setMessage('Supabase có '+data.length+' hồ sơ của tài khoản này. '+(data.length?'Ví dụ: '+data.slice(0,3).map(x=>x.title).join(', '):'Chưa có hồ sơ.'));}catch(e){setMessage('Không kiểm tra được: '+e.message)}}
-// Download fallback: existing UI calls getFile(id); if the file is not in IndexedDB, read from private Supabase Storage.
-async function enableFallback(){if(typeof getFile!=='function'||typeof pvSupabase==='undefined')return;const original=getFile;getFile=async function(key){let local=await original(key);if(local)return local;const sb=cloud(),u=activeUser();const {data:doc,error}=await sb.from(TABLE).select('file_path').eq('id',key).eq('owner_id',u.id).maybeSingle();if(error)throw error;if(!doc)return null;const {data:file,error:e}=await sb.storage.from(BUCKET).download(doc.file_path);if(e)throw e;return file};}
-// Load remote records without deleting existing local records. Avoid automatic overwriting of local changes.
-async function pull(){try{if(typeof db==='undefined'||!Array.isArray(db.docs)||!pvAuthUser)return;const sb=cloud(),u=activeUser();const {data,error}=await sb.from(TABLE).select('id,payload').eq('owner_id',u.id).limit(1000);if(error)throw error;let changed=false;for(const d of data){if(!db.docs.some(x=>x.id===d.id)){db.docs.push(d.payload);changed=true}}if(changed){save();if(typeof render==='function')render()}}catch(e){console.warn('PV cloud pull:',e.message)}}
-window.pvOpenCloudMigration=panel;
-let ready=false;const init=setInterval(()=>{if(typeof pvSupabase!=='undefined'&&pvSupabase&&typeof getFile==='function'&&!ready){ready=true;clearInterval(init);enableFallback();pull();pvSupabase.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_IN'||event==='INITIAL_SESSION')setTimeout(pull,500)})}},400);setTimeout(()=>clearInterval(init),30000);
-const button=setInterval(()=>{if(!document.body)return;clearInterval(button);const trigger=document.createElement('button');trigger.type='button';trigger.textContent='☁ Đồng bộ hồ sơ';trigger.style.cssText='position:fixed;bottom:12px;left:12px;z-index:9997;padding:11px 14px;border:0;border-radius:12px;background:#0756a6;color:white;font-weight:bold;box-shadow:0 4px 12px #0005';trigger.onclick=panel;document.body.appendChild(trigger)},100);
-})();
+async function pvCloudSetDeleted(d,deleted){
+ const sb=pvCloud();if(d.owner!==pvAuthUser.id)throw Error('Chỉ chủ hồ sơ được chuyển vào hoặc khôi phục từ Thùng rác trên máy chủ');
+ const payload={...d};if(deleted){payload.deletedAt=new Date().toISOString();payload.deletedById=pvAuthUser.id}else{delete payload.deletedAt;delete payload.deletedBy;delete payload.deletedById}
+ const {data,error}=await sb.from(PV_DOC_TABLE).update({deleted_at:deleted?new Date().toISOString():null,payload}).eq('id',d.id).eq('owner_id',pvAuthUser.id).select('id');
+ if(error)throw error;if(!data?.length)throw Error('Máy chủ không xác nhận thay đổi. Hồ sơ có thể chưa được chuyển lên Supabase');
+}
+async function pvCloudPull(){
+ try{
+  if(!pvAuthUser?.id||!Array.isArray(db?.docs))return;
+  const sb=pvCloud();const userId=pvAuthUser.id;
+  const {data,error}=await sb.from(PV_DOC_TABLE).select('id,payload,deleted_at').eq('owner_id',userId).limit(1000);
+  if(error)throw error;if(pvAuthUser?.id!==userId)return;
+  const remoteIds=new Set(data.map(x=>x.id));
+  // Cloud records replace matching local records; never erase legacy local-only records.
+  for(const rec of data){if(!rec.payload||typeof rec.payload!=='object')continue;
+   const d={...rec.payload};const inTrash=!!rec.deleted_at;
+   if(inTrash){d.deletedAt=d.deletedAt||rec.deleted_at;d.deletedBy=d.deletedBy||'Người dùng'}
+   db.docs=db.docs.filter(x=>x.id!==rec.id);db.trash=db.trash.filter(x=>x.id!==rec.id);
+   (inTrash?db.trash:db.docs).unshift(d);
+  }
+  save();if(typeof render==='function'&&pvAuthUser?.id===userId)render();
+ }catch(e){console.warn('Không đồng bộ được hồ sơ từ máy chủ:',e.message)}
+}
+// Read files on another computer from the private Storage bucket.
+(function(){let attempts=0;const wait=setInterval(()=>{if(typeof getFile!=='function'||!pvSupabase){if(++attempts>80)clearInterval(wait);return}clearInterval(wait);
+ const original=getFile;getFile=async function(key){const local=await original(key);if(local)return local;
+ const sb=pvCloud();const {data:doc,error}=await sb.from(PV_DOC_TABLE).select('file_path').eq('id',key).eq('owner_id',pvAuthUser.id).maybeSingle();
+ if(error)throw error;if(!doc)return null;
+ const {data:file,error:fileError}=await sb.storage.from(PV_DOC_BUCKET).download(doc.file_path);
+ if(fileError)throw fileError;return file};
+ pvCloudPull();pvSupabase.auth.onAuthStateChange((event,session)=>{if(session?.user&&(event==='SIGNED_IN'||event==='INITIAL_SESSION'))setTimeout(pvCloudPull,500)});
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden)pvCloudPull()});
+ },250)})();
+async function pvDeleteForever(key){
+ const d=db.trash.find(x=>x.id===key);
+ if(!d||!pvAuthUser||d.owner!==pvAuthUser.id)return alert('Chỉ chủ hồ sơ được yêu cầu xóa vĩnh viễn');
+ if(!confirm('XÓA VĨNH VIỄN hồ sơ "'+d.title+'"? Sau khi máy chủ chấp nhận, không thể khôi phục.'))return;
+ if(!confirm('XÁC NHẬN LẦN CUỐI: Xóa cả hồ sơ và tệp khỏi máy chủ?'))return;
+ try{
+  const sb=pvCloud();const {data:{session},error:authError}=await sb.auth.getSession();
+  if(authError||!session?.access_token)throw Error('Phiên đăng nhập không hợp lệ');
+  const {data:row,error:readError}=await sb.from(PV_DOC_TABLE).select('id,owner_id,deleted_at').eq('id',key).eq('owner_id',pvAuthUser.id).maybeSingle();
+  if(readError)throw readError;if(!row?.deleted_at)throw Error('Máy chủ chưa xác nhận hồ sơ ở Thùng rác');
+  const response=await fetch(PV_SUPABASE_URL+'/functions/v1/pv-permanent-delete',{method:'POST',headers:{'Content-Type':'application/json',apikey:PV_SUPABASE_KEY,Authorization:'Bearer '+session.access_token},body:JSON.stringify({document_id:key})});
+  const result=await response.json().catch(()=>({}));
+  if(!response.ok||result.success!==true)throw Error(result.message||result.error||'Máy chủ chưa cho phép xóa vĩnh viễn (HTTP '+response.status+')');
+  db.trash=db.trash.filter(x=>x.id!==key);save();render();alert('Máy chủ xác nhận đã xóa vĩnh viễn hồ sơ.');
+ }catch(e){alert('Chưa xóa hồ sơ. '+e.message+'\nDữ liệu vẫn được giữ nguyên.');}
+}
 </script>
 
-<script id="pv-permanent-delete-auth-test-20261029">
-/* Safety test ONLY: no local data, Storage objects or database rows are removed. */
-window.pvTestPermanentDelete=async function(documentId){
-  const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  try{
-    if(!uuid.test(String(documentId))) throw new Error('Mã hồ sơ chưa phải UUID hợp lệ. Không thể kiểm tra hồ sơ này.');
-    if(typeof pvSupabase==='undefined'||!pvSupabase) throw new Error('Chưa kết nối Supabase.');
-    const {data:{session},error:sessionError}=await pvSupabase.auth.getSession();
-    if(sessionError||!session?.access_token||!session?.user?.id) throw new Error('Chưa có phiên đăng nhập Supabase hợp lệ.');
-    if(typeof db==='undefined'||!Array.isArray(db.trash)) throw new Error('Không đọc được Thùng rác.');
-    const doc=db.trash.find(d=>d.id===documentId);
-    if(!doc) throw new Error('Hồ sơ không nằm trong Thùng rác của máy này.');
-    if(doc.owner!==session.user.id) throw new Error('Chỉ chủ sở hữu mới được yêu cầu kiểm tra xóa vĩnh viễn.');
-    const {data:remote,error:readError}=await pvSupabase.from('pv_documents')
-      .select('id,owner_id,deleted_at').eq('id',documentId).eq('owner_id',session.user.id).maybeSingle();
-    if(readError) throw new Error('Không xác minh được hồ sơ trên Supabase: '+readError.message);
-    if(!remote) throw new Error('Hồ sơ chưa có trên Supabase. Không gửi yêu cầu xóa.');
-    if(!remote.deleted_at) throw new Error('Hồ sơ trên Supabase chưa nằm trong Thùng rác.');
-    if(!confirm('CHỈ KIỂM TRA BẢO MẬT cho hồ sơ "'+(doc.title||'')+'". Máy chủ đang KHÓA xóa thật. Tiếp tục?')) return;
-    const response=await fetch(PV_SUPABASE_URL+'/functions/v1/pv-permanent-delete',{
-      method:'POST',headers:{'Content-Type':'application/json','apikey':PV_SUPABASE_KEY,
-        'Authorization':'Bearer '+session.access_token},
-      body:JSON.stringify({document_id:documentId})
-    });
-    let result={};try{result=await response.json()}catch{}
-    const code=String(result.code||'UNKNOWN');
-    const message=String(result.message||result.error||'Không có thông báo từ máy chủ');
-    alert('KẾT QUẢ KIỂM TRA (không xóa dữ liệu)\nHTTP '+response.status+'\nMã: '+code+'\n'+message+'\n\nHồ sơ và tệp gốc vẫn được giữ nguyên.');
-    console.info('PV permanent-delete dry-run', {http:response.status,code});
-  }catch(e){alert('Không thể kiểm tra xóa vĩnh viễn:\n'+(e?.message||String(e))+'\n\nKhông có dữ liệu nào bị xóa.');}
-};
-</script>
-<script id="pv-signature-security-status-20261029">
-/* Informational, non-destructive test status. Real signature verification must be server-side. */
-(function(){
-  function show(){
-    if(document.getElementById('pv-signature-security-notice'))return;
-    const box=document.createElement('aside');
-    box.id='pv-signature-security-notice';
-    box.setAttribute('role','status');
-    box.style.cssText='position:fixed;bottom:12px;right:12px;max-width:360px;z-index:9999;background:#fff8e1;border:1px solid #e7c36b;border-radius:10px;padding:10px 14px;box-shadow:0 4px 18px #0002;font:12px/1.5 Arial,sans-serif;color:#6b4b06';
-    const text=document.createElement('div');
-    text.textContent='🔒 Chế độ thử nghiệm an toàn: chưa bật xóa vĩnh viễn. Trạng thái ký trên HTML không thay thế xác minh lịch sử ký trên máy chủ.';
-    const close=document.createElement('button');
-    close.textContent='Ẩn thông báo';
-    close.type='button';
-    close.style.cssText='margin-top:5px;border:1px solid #cba74d;border-radius:5px;background:white;padding:3px 8px;cursor:pointer';
-    close.addEventListener('click',()=>box.remove());
-    box.append(text,close);document.body.appendChild(box);
-  }
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',show);else show();
-})();
-</script>
+
+
 </body></html>
